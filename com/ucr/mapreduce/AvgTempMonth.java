@@ -145,6 +145,7 @@ public class AvgTempMonth {
 		job.setJarByClass(AvgTempMonth.class);
 		job.setMapperClass(AvgTempMonthMapper.class);
 		
+		//all input files
 		DistributedCache.addCacheFile(new URI("/input_dir/2006.txt"), job.getConfiguration());
 		DistributedCache.addCacheFile(new URI("/input_dir/2007.txt"), job.getConfiguration());
 		DistributedCache.addCacheFile(new URI("/input_dir/2008.txt"), job.getConfiguration());
