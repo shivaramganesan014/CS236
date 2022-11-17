@@ -78,14 +78,14 @@ public class StableTemperature {
 		}
 	}
 	
-	public static class TemperatureReducer extends Reducer<Text, Text, Text, DoubleWritable>{
+	public static String getMonthInString(int month) {
+		String[] months = new String[] {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
+		return months[month-1];
+	}
+	
+	public static class TemperatureReducer extends Reducer<Text, Text, Text, Text>{
 		
-		private static String getMonthInString(int month) {
-			String[] months = new String[] {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
-			return months[month-1];
-		}
-		
-		public void reduce(Text key, Iterable<Text> values, Reducer<Text, Text, Text, DoubleWritable>.Context context)
+		public void reduce(Text key, Iterable<Text> values, Reducer<Text, Text, Text, Text>.Context context)
 				throws IOException, InterruptedException {
 			//AK	324.0::24.0
 			double totalTemp = 0.0;
@@ -109,8 +109,50 @@ public class StableTemperature {
 				totalCount++;
 			}
 			Double averageTempAtState = totalTemp / totalCount;
-			System.out.println("Computing for "+key+" -> " + totalTemp + " / " + totalCount + " = " + String.valueOf(averageTempAtState));
-			context.write(new Text(state+" "+monthInString), new DoubleWritable(averageTempAtState));
+//			System.out.println("Computing for "+key+" -> " + totalTemp + " / " + totalCount + " = " + String.valueOf(averageTempAtState));
+			context.write(new Text(state), new Text(averageTempAtState.toString()+", "+monthInString));
+		}
+	}
+	
+	public static class MinMaxMapper extends Mapper<Object, Text, Text, Text>{
+		
+		public void map(Object key, Text value, Mapper<Text, Text, Text, Text>.Context context)
+				throws IOException, InterruptedException {
+			
+			String line = value.toString();
+			String[] cols = line.split("\\s+");
+			context.write(new Text(cols[0]), new Text(cols[1]));
+		}
+	}
+	
+	public static class MinMaxReducer extends Reducer<Text, Text, Text, Text>{
+		
+		public void reduce(Text key, Iterable<Text> values, Reducer<Text, Text, Text, Text>.Context context)
+				throws IOException, InterruptedException {
+			Double maxTemp = Double.MIN_VALUE;
+			Double minTemp = Double.MAX_VALUE;
+			String minMonth = "";
+			String maxMonth = "";
+			Double totalTemp = 0.0;
+			Double totalCount = 0.0;
+			for(Text t : values) {
+				String[] tempVsMonth = t.toString().split(",");
+				Double temp = Double.valueOf(tempVsMonth[0]);
+				totalTemp += temp;
+				totalCount++;
+				if(temp > maxTemp) {
+					maxTemp = temp;
+					maxMonth = tempVsMonth[1];
+				}
+				if(temp < minTemp) {
+					minTemp = temp;
+					minMonth = tempVsMonth[1];
+				}
+			}
+			Double avgTemp = totalTemp/totalCount;
+			String outValue = avgTemp + " :: "+ maxTemp.toString() + ", " + maxMonth + " " + minTemp.toString() + ", " + minMonth + " " + (maxTemp - minTemp);
+			System.out.println(outValue);
+			context.write(key, new Text(outValue));
 		}
 	}
 
@@ -118,36 +160,45 @@ public class StableTemperature {
 		Configuration conf = new Configuration();
 		Job job = Job.getInstance(conf, "MapJoin");
 		
-		job.setJarByClass(AvgTempMonth.class);
+		job.setJarByClass(StableTemperature.class);
 		job.setMapperClass(TemperatureMapper.class);
 		
-		//all input files
-//		DistributedCache.addCacheFile(new URI("/input_dir/2006.txt"), job.getConfiguration());
-//		DistributedCache.addCacheFile(new URI("/input_dir/2007.txt"), job.getConfiguration());
-//		DistributedCache.addCacheFile(new URI("/input_dir/2008.txt"), job.getConfiguration());
-//		DistributedCache.addCacheFile(new URI("/input_dir/2009.txt"), job.getConfiguration());
 		DistributedCache.addCacheFile(new URI(args[0]), job.getConfiguration());
 		
 		job.setReducerClass(TemperatureReducer.class);
-//		job.setCombinerClass(AvgTempMonthReducer.class);
-//		job.setNumReduceTasks(0);
 		
 		job.setInputFormatClass(KeyValueTextInputFormat.class);
 		
 		job.setMapOutputKeyClass(Text.class);
 		job.setMapOutputValueClass(Text.class);
 		job.setOutputKeyClass(Text.class);
-		job.setOutputValueClass(DoubleWritable.class);
+		job.setOutputValueClass(Text.class);
 		
-//		job.setOutputFormatClass(TextOutputFormat.class);
-		
-//		FileInputFormat.addInputPath(job, new Path(args[0]));
 		MultipleInputs.addInputPath(job, new Path("/input_dir/2007.txt"), TextInputFormat.class, TemperatureMapper.class);
 		MultipleInputs.addInputPath(job, new Path("/input_dir/2006.txt"), TextInputFormat.class, TemperatureMapper.class);
 		MultipleInputs.addInputPath(job, new Path("/input_dir/2008.txt"), TextInputFormat.class, TemperatureMapper.class);
 		MultipleInputs.addInputPath(job, new Path("/input_dir/2009.txt"), TextInputFormat.class, TemperatureMapper.class);
 		FileOutputFormat.setOutputPath(job, new Path(args[1]));
-		System.exit(job.waitForCompletion(true) ? 0 : 1);
+		
+//		System.exit(job.waitForCompletion(true) ? 0 : 1);
+		job.waitForCompletion(true);
+		
+		Configuration confMinMax = new Configuration();
+		Job minMaxJob = Job.getInstance(confMinMax, "MinMaxJob");
+		minMaxJob.setJarByClass(StableTemperature.class);
+		minMaxJob.setMapperClass(MinMaxMapper.class);
+		
+		minMaxJob.setReducerClass(MinMaxReducer.class);
+		minMaxJob.setInputFormatClass(KeyValueTextInputFormat.class);
+		minMaxJob.setMapOutputKeyClass(Text.class);
+		minMaxJob.setMapOutputValueClass(Text.class);
+		minMaxJob.setOutputKeyClass(Text.class);
+		minMaxJob.setOutputValueClass(Text.class);
+		
+		FileInputFormat.addInputPath(minMaxJob, new Path(args[1]));
+		FileOutputFormat.setOutputPath(minMaxJob, new Path("/output_dir/min_max.txt"));
+		
+		System.exit(minMaxJob.waitForCompletion(true) ? 0 : 1);
 		
 	}
 
