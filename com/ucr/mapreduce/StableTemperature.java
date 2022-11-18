@@ -1,16 +1,23 @@
 package com.ucr.mapreduce;
 
 import java.io.BufferedReader;
+import java.io.DataInput;
+import java.io.DataOutput;
 import java.io.FileReader;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.DoubleWritable;
 import org.apache.hadoop.io.Text;
+import org.apache.hadoop.io.WritableComparable;
+import org.apache.hadoop.io.WritableComparator;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
@@ -23,6 +30,111 @@ import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
 
 public class StableTemperature {
+	
+	public static class MinMaxComparator extends WritableComparator{
+		public MinMaxComparator() {
+			super(MinMaxValue.class, true);
+		}
+		@Override
+		public int compare(WritableComparable w1, WritableComparable w2) {
+			MinMaxValue v1 = (MinMaxValue)w1;
+			MinMaxValue v2 = (MinMaxValue)w2;
+			return v2.compareTo(v1);
+		}
+	}
+	
+	public static class MinMaxValue implements WritableComparable<MinMaxValue>{
+
+		Double minTemperature;
+		Double maxTemperature;
+		String minMonth;
+		String maxMonth;
+		Double difference;
+		String state;
+		
+		public String getState() {
+			return state;
+		}
+
+		public void setState(String state) {
+			this.state = state;
+		}
+
+		@Override
+		public String toString() {
+			return maxTemperature + ", " + maxMonth + " :: " + minTemperature + ", " + minMonth + " :: " + difference;
+		}
+		
+//		public MinMaxValue() {
+//
+//		}
+		
+		public Double getDifference() {
+			return difference;
+		}
+
+		public void setDifference(Double difference) {
+			this.difference = difference;
+		}
+
+		public Double getMinTemperature() {
+			return minTemperature;
+		}
+
+		public void setMinTemperature(Double minTemperature) {
+			this.minTemperature = minTemperature;
+		}
+
+		public Double getMaxTemperature() {
+			return maxTemperature;
+		}
+
+		public void setMaxTemperature(Double maxTemperature) {
+			this.maxTemperature = maxTemperature;
+		}
+
+		public String getMinMonth() {
+			return minMonth;
+		}
+
+		public void setMinMonth(String minMonth) {
+			this.minMonth = minMonth;
+		}
+
+		public String getMaxMonth() {
+			return maxMonth;
+		}
+
+		public void setMaxMonth(String maxMonth) {
+			this.maxMonth = maxMonth;
+		}
+
+		@Override
+		public void write(DataOutput out) throws IOException {
+			out.writeDouble(this.minTemperature);
+			out.writeDouble(this.maxTemperature);
+			out.writeUTF(maxMonth);
+			out.writeUTF(minMonth);
+			out.writeDouble(difference);
+			out.writeUTF(state);
+		}
+		
+		@Override
+		public void readFields(DataInput in) throws IOException {
+			minTemperature = in.readDouble();
+			maxTemperature = in.readDouble();
+			maxMonth = in.readUTF();
+			minMonth = in.readUTF();
+			difference = in.readDouble();
+			state = in.readUTF();
+		}
+
+		@Override
+		public int compareTo(MinMaxValue o) {
+			return o.getDifference().compareTo(difference);
+		}
+		
+	}
 	
 	public static class TemperatureMapper extends Mapper<Object, Text, Text, Text>{
 		
@@ -118,28 +230,30 @@ public class StableTemperature {
 		
 		public void map(Object key, Text value, Mapper<Text, Text, Text, Text>.Context context)
 				throws IOException, InterruptedException {
-			
+			//AK	8.46182197828121, January
 			String line = value.toString();
 			String[] cols = line.split("\\s+");
 			context.write(new Text(cols[0]), new Text(cols[1]));
 		}
 	}
 	
-	public static class MinMaxReducer extends Reducer<Text, Text, Text, Text>{
+	public static class MinMaxReducer extends Reducer<Text, Text, Text, MinMaxValue>{
 		
-		public void reduce(Text key, Iterable<Text> values, Reducer<Text, Text, Text, Text>.Context context)
+		HashMap<String, MinMaxValue> map = new HashMap();
+		
+		public void reduce(Text key, Iterable<Text> values, Reducer<Text, Text, Text, MinMaxValue>.Context context)
 				throws IOException, InterruptedException {
 			Double maxTemp = Double.MIN_VALUE;
 			Double minTemp = Double.MAX_VALUE;
 			String minMonth = "";
 			String maxMonth = "";
-			Double totalTemp = 0.0;
-			Double totalCount = 0.0;
+//			Double totalTemp = 0.0;
+//			Double totalCount = 0.0;
 			for(Text t : values) {
 				String[] tempVsMonth = t.toString().split(",");
 				Double temp = Double.valueOf(tempVsMonth[0]);
-				totalTemp += temp;
-				totalCount++;
+//				totalTemp += temp;
+//				totalCount++;
 				if(temp > maxTemp) {
 					maxTemp = temp;
 					maxMonth = tempVsMonth[1];
@@ -149,14 +263,34 @@ public class StableTemperature {
 					minMonth = tempVsMonth[1];
 				}
 			}
-			Double avgTemp = totalTemp/totalCount;
-			String outValue = avgTemp + " :: "+ maxTemp.toString() + ", " + maxMonth + " " + minTemp.toString() + ", " + minMonth + " " + (maxTemp - minTemp);
-			System.out.println(outValue);
-			context.write(key, new Text(outValue));
+//			Double avgTemp = totalTemp/totalCount;
+			MinMaxValue outputValue = new MinMaxValue();
+			outputValue.setMaxMonth(maxMonth);
+			outputValue.setMinMonth(minMonth);
+			outputValue.setMaxTemperature(maxTemp);
+			outputValue.setMinTemperature(minTemp);
+			outputValue.setDifference(maxTemp - minTemp);
+			outputValue.setState(key.toString());
+//			String outValue = maxTemp.toString() + ", " + maxMonth + " " + minTemp.toString() + ", " + minMonth + " " + (maxTemp - minTemp);
+//			System.out.println(outValue);
+//			context.write(key, outputValue);
+			map.put(key.toString(), outputValue);
+		}
+		
+		@Override
+		protected void cleanup(Reducer<Text, Text, Text, MinMaxValue>.Context context)
+				throws IOException, InterruptedException {
+			// TODO Auto-generated method stub
+			List<MinMaxValue> list = new ArrayList(map.values());
+			Collections.sort(list, new MinMaxComparator());
+			for(MinMaxValue v : list) {
+				context.write(new Text(v.getState()), v);
+			}
 		}
 	}
 
 	public static void main(String[] args) throws IOException, ClassNotFoundException, InterruptedException, URISyntaxException {
+		Long job1StartTime = System.currentTimeMillis();
 		Configuration conf = new Configuration();
 		Job job = Job.getInstance(conf, "MapJoin");
 		
@@ -181,8 +315,9 @@ public class StableTemperature {
 		FileOutputFormat.setOutputPath(job, new Path(args[1]));
 		
 //		System.exit(job.waitForCompletion(true) ? 0 : 1);
+		System.out.print("Job 1 completed in :: " + (System.currentTimeMillis() - job1StartTime));
 		job.waitForCompletion(true);
-		
+		Long job2StartTime = System.currentTimeMillis();
 		Configuration confMinMax = new Configuration();
 		Job minMaxJob = Job.getInstance(confMinMax, "MinMaxJob");
 		minMaxJob.setJarByClass(StableTemperature.class);
@@ -193,10 +328,14 @@ public class StableTemperature {
 		minMaxJob.setMapOutputKeyClass(Text.class);
 		minMaxJob.setMapOutputValueClass(Text.class);
 		minMaxJob.setOutputKeyClass(Text.class);
-		minMaxJob.setOutputValueClass(Text.class);
+		minMaxJob.setOutputValueClass(MinMaxValue.class);
+//		minMaxJob.setSortComparatorClass(MinMaxComparator.class);
+		
 		
 		FileInputFormat.addInputPath(minMaxJob, new Path(args[1]));
-		FileOutputFormat.setOutputPath(minMaxJob, new Path("/output_dir/min_max.txt"));
+		FileOutputFormat.setOutputPath(minMaxJob, new Path("/output_dir/min_max"));
+		
+		System.out.print("Job 2 completed in :: " + (System.currentTimeMillis() - job2StartTime));
 		
 		System.exit(minMaxJob.waitForCompletion(true) ? 0 : 1);
 		
