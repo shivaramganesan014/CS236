@@ -34,6 +34,8 @@ import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
 
 public class StableTemperature {
 	
+	
+	//custom comparator class used in sorting the values of MinMaxReducer based on the temperature difference value.
 	public static class MinMaxComparator extends WritableComparator{
 		public MinMaxComparator() {
 			super(MinMaxValue.class, true);
@@ -46,22 +48,7 @@ public class StableTemperature {
 		}
 	}
 	
-//	public static class MinMaxValueColumn extends MinMaxValue{
-//		String maxTemp = "MaxTemp";
-//		String maxMonth = "MaxMonth";
-//		String minMonth = "MinMonth";
-//		String minTemp = "MinTemp";
-//		String difference = "TempDifference";
-//		String minPrec = "MinPrec";
-//		String maxPrec = "MaxPrec";
-//		
-//		String sep = "\t";
-//		
-//		public String toString() {
-//			return maxTemp + sep + maxMonth + sep + minTemp + sep + minMonth + sep + difference + sep + minPrec + sep + maxPrec;
-//		}
-//	}
-	
+	//custom class to store the multiple values and used as output of second job: MinMaxReducer
 	public static class MinMaxValue implements WritableComparable<MinMaxValue>{
 
 		Double minTemperature;
@@ -71,6 +58,8 @@ public class StableTemperature {
 		Double difference;
 		String state;
 		Double maxMonthPrec;
+		Double minMonthPrec;
+		
 		public Double getMaxMonthPrec() {
 			return maxMonthPrec;
 		}
@@ -86,8 +75,6 @@ public class StableTemperature {
 		public void setMinMonthPrec(Double minMonthPrec) {
 			this.minMonthPrec = minMonthPrec;
 		}
-
-		Double minMonthPrec;
 		
 		public String getState() {
 			return state;
@@ -100,6 +87,7 @@ public class StableTemperature {
 		@Override
 		public String toString() {
 			if(state == null) {
+				//returns the header values if state is null
 				String maxTemp = "MaxTemp";
 				String maxMonth = "MaxMonth";
 				String minMonth = "MinMonth";
@@ -111,14 +99,9 @@ public class StableTemperature {
 				String sep = "\t";
 				return maxTemp + sep + maxMonth + sep + minTemp + sep + minMonth + sep + difference + sep + minPrec + sep + maxPrec;
 			}
-			
+			//returns the output values
 			return format(maxTemperature) + "\t" + maxMonth + "\t" + format(minTemperature) + "\t" + minMonth + "\t" + format(difference) + "\t" + format(minMonthPrec) + "\t" + format(maxMonthPrec);
 		}
-		
-		
-//		public MinMaxValue() {
-//
-//		}
 		
 		public Double getDifference() {
 			return difference;
@@ -191,6 +174,7 @@ public class StableTemperature {
 		
 	}
 	
+	//to format the output data, truncating to 2 decimal places.
 	public static String format(Double d) {
 		return String.format("%.2f", d);
 	}
@@ -242,7 +226,6 @@ public class StableTemperature {
 					String stateVsMonth = state+"::"+month;
 					String tempVsCount = avgTemp+"::"+count;
 					String outValue = tempVsCount + "::" + precepitation;
-//					context.write(new Text(stateVsMonth), new Text(tempVsCount));
 					context.write(new Text(stateVsMonth), new Text(outValue));
 				}
 				
@@ -262,7 +245,7 @@ public class StableTemperature {
 		
 		public void reduce(Text key, Iterable<Text> values, Reducer<Text, Text, Text, Text>.Context context)
 				throws IOException, InterruptedException {
-			//sample input -> AK	324.0::24.0
+			//sample input -> AK	324.0::24.0::0.02
 			double totalTemp = 0.0;
 			double totalPrec = 0.0;
 			double totalCount = 0.0;
@@ -288,6 +271,8 @@ public class StableTemperature {
 				
 				totalCount += 1;
 				totalTemp += tempAtState;
+//				another way of computing the average - including the number of readings
+//				totalCount += count;
 //				totalTemp += tempAtState * count;
 			}
 			if(totalCount == 0) {
@@ -295,8 +280,6 @@ public class StableTemperature {
 			}
 			Double averageTempAtState = totalTemp / totalCount;
 			Double averagePrec = totalPrec / totalCount;
-//			System.out.println("Computing for "+key+" -> " + totalTemp + " / " + totalCount + " = " + String.valueOf(averageTempAtState));
-//			context.write(new Text(state+"::"+month), new Text(averageTempAtState.toString()+"::"+monthInString + "::" + averagePrec));
 			context.write(new Text(state+"::"+month), new Text(averageTempAtState.toString()+"::"+totalCount+ "::" + format(averagePrec)));
 		}
 	}
@@ -307,8 +290,7 @@ public class StableTemperature {
 		public void run(Reducer<Text, Text, Text, Text>.Context context) throws IOException, InterruptedException {
 			setup(context);
 			Text column = new Text("State");
-//			Text values = new Text("MaxTemp \t MaxMonth \t MinTemp \t MinMonth \t TempDiff \t MinPrecipitation \t MaxPrecipitation");
-			context.write(column, new Text("AvgTemperature \t Month \t AvgPrecipitation"));
+			context.write(column, new Text("AvgTemperature \t Month \t AvgPrecipitation")); //header for the output file.
 			while (context.nextKeyValue()) {
 		       reduce(context.getCurrentKey(), context.getValues(), context);
 		    }
@@ -318,11 +300,6 @@ public class StableTemperature {
 		public void reduce(Text key, Iterable<Text> values, Reducer<Text, Text, Text, Text>.Context context)
 				throws IOException, InterruptedException {
 			//sample input -> AK	324.0::24.0
-//			for(Text t : values) {
-//				context.write(key, t);
-//			}
-			//sample input -> AK	324.0::24.0
-//			System.out.println("Inside reducer :: " + key.toString());
 			double totalTemp = 0.0;
 			double totalPrec = 0.0;
 			double totalCount = 0.0;
@@ -336,7 +313,6 @@ public class StableTemperature {
 			String month = stateVsMonth[1];
 			String monthInString = getMonthInString(Integer.parseInt(month));
 			for(Text t : values) {
-//				System.out.println("reducer value :: "+t.toString());
 				String[] tempData = t.toString().split("::");
 				if(tempData.length < 3) {//temp, count and precipitation
 					continue;
@@ -349,6 +325,8 @@ public class StableTemperature {
 				
 				totalCount += 1;
 				totalTemp += tempAtState;
+//				another way of computing the average - including the number of readings
+//				totalCount += count;
 //				totalTemp += tempAtState * count;
 			}
 			if(totalCount == 0) {
@@ -356,7 +334,6 @@ public class StableTemperature {
 			}
 			Double averageTempAtState = totalTemp / totalCount;
 			Double averagePrec = totalPrec / totalCount;
-//			System.out.println("Computing for "+key+" -> " + totalTemp + " / " + totalCount + " = " + String.valueOf(averageTempAtState));
 			context.write(new Text(state), new Text(averageTempAtState.toString()+"\t"+monthInString + "\t" + format(averagePrec)));
 		}
 	}
@@ -382,11 +359,8 @@ public class StableTemperature {
 		
 		@Override
 		public void run(Reducer<Text, Text, Text, MinMaxValue>.Context context) throws IOException, InterruptedException {
-			// TODO Auto-generated method stub
-//			super.run(context);
 			setup(context);
 			Text column = new Text("State");
-//			Text values = new Text("MaxTemp \t MaxMonth \t MinTemp \t MinMonth \t TempDiff \t MinPrecipitation \t MaxPrecipitation");
 			context.write(column, new MinMaxValue());
 			while (context.nextKeyValue()) {
 		       reduce(context.getCurrentKey(), context.getValues(), context);
@@ -400,22 +374,13 @@ public class StableTemperature {
 			Double minTemp = Double.MAX_VALUE;
 			String minMonth = "";
 			String maxMonth = "";
-//			Double averagePrecipitation = 0.0;
 			double minPrec = Double.MAX_VALUE;
 			double maxPrec = Double.MIN_VALUE;
-//			Double totalTemp = 0.0;
-//			Double totalCount = 0.0;
 			for(Text t : values) {
-//				if(t.toString().indexOf("State") >= 0) {
-//					continue;
-//				}
-//				System.out.println("*****"+t.toString());
 				String[] tempVsMonth = t.toString().split("\\s+");
 				try {
 					Double temp = Double.valueOf(tempVsMonth[0]);
 					Double prec = Double.valueOf(tempVsMonth[2]);
-//					totalTemp += temp;
-//					totalCount++;
 					if(temp > maxTemp) {
 						maxTemp = temp;
 						maxMonth = tempVsMonth[1];
@@ -429,11 +394,8 @@ public class StableTemperature {
 				}
 				catch(Exception e) {
 					
-				}
-				
+				}	
 			}
-//			averagePrecipitation = (minPrec + maxPrec) / 2;
-//			Double avgTemp = totalTemp/totalCount;
 			MinMaxValue outputValue = new MinMaxValue();
 			outputValue.setMaxMonth(maxMonth);
 			outputValue.setMinMonth(minMonth);
@@ -443,16 +405,12 @@ public class StableTemperature {
 			outputValue.setState(key.toString());
 			outputValue.setMinMonthPrec(minPrec);
 			outputValue.setMaxMonthPrec(maxPrec);
-//			String outValue = maxTemp.toString() + ", " + maxMonth + " " + minTemp.toString() + ", " + minMonth + " " + (maxTemp - minTemp);
-//			System.out.println(outValue);
-//			context.write(key, outputValue);
 			map.put(key.toString(), outputValue);
 		}
 		
 		@Override
 		protected void cleanup(Reducer<Text, Text, Text, MinMaxValue>.Context context)
 				throws IOException, InterruptedException {
-			// TODO Auto-generated method stub
 			List<MinMaxValue> list = new ArrayList(map.values());
 			Collections.sort(list, new MinMaxComparator());
 			for(MinMaxValue v : list) {
@@ -466,9 +424,7 @@ public class StableTemperature {
 
 	public static void main(String[] args) throws IOException, ClassNotFoundException, InterruptedException, URISyntaxException {
 		
-		
-//		String inputPathFile = "/input_dir/WeatherStationLocations.csv";
-		String inputPathFile = args[0];
+		String inputPathFile = args[0]+"/WeatherStationLocations.csv";
 		String outputFilePathName = args[2];
 		String stateTempOutputFile = "/states_temperature";
 		String minMaxTempOutputFile = "/min_max_temperature";
@@ -481,11 +437,11 @@ public class StableTemperature {
 //	    hdfs.delete(new Path(outputFilePathName+stateTempOutputFile), true);
 //	    hdfs.delete(new Path(outputFilePathName + minMaxTempOutputFile), true);
 		
-	    //job to get average temperature for each states
 		Long job1StartTime = System.currentTimeMillis();
 		Configuration conf = new Configuration();
-		Job job = Job.getInstance(conf, "AverageTemperatureByStates");
 		
+		//Job 1: To compute the average temperature of each states for each month
+		Job job = Job.getInstance(conf, "AverageTemperatureByStates");
 		job.setJarByClass(StableTemperature.class);
 		job.setMapperClass(TemperatureMapper.class);
 		
@@ -495,57 +451,43 @@ public class StableTemperature {
 		job.setReducerClass(TemperatureReducer.class);
 		job.setCombinerClass(TemperatureCombiner.class);
 		
-//		job.setInputFormatClass(KeyValueTextInputFormat.class);
-		
 		job.setMapOutputKeyClass(Text.class);
 		job.setMapOutputValueClass(Text.class);
 		job.setOutputKeyClass(Text.class);
 		job.setOutputValueClass(Text.class);
 		
+		//Read all the files in the temperature directory and add it as input to the job
 		String temperatureFileDir = args[1];
 		FileSystem fs = FileSystem.get(conf);
-		
-		
 
 		RemoteIterator<LocatedFileStatus> fileStatusListIterator = fs.listFiles(new Path(temperatureFileDir), true);
 		
 		 while(fileStatusListIterator.hasNext()){
 	        LocatedFileStatus fileStatus = fileStatusListIterator.next();
-	        //do stuff with the file like ...
 	        MultipleInputs.addInputPath(job, fileStatus.getPath(), TextInputFormat.class, TemperatureMapper.class);
 	    }
 		
-//		MultipleInputs.addInputPath(job, new Path("/input_dir/2007.txt"), TextInputFormat.class, TemperatureMapper.class);
-//		MultipleInputs.addInputPath(job, new Path("/input_dir/2006.txt"), TextInputFormat.class, TemperatureMapper.class);
-//		MultipleInputs.addInputPath(job, new Path("/input_dir/2008.txt"), TextInputFormat.class, TemperatureMapper.class);
-//		MultipleInputs.addInputPath(job, new Path("/input_dir/2009.txt"), TextInputFormat.class, TemperatureMapper.class);
 		FileOutputFormat.setOutputPath(job, new Path(outputFilePathName+stateTempOutputFile));
-		
-		System.out.print("Job 1 completed in :: " + (System.currentTimeMillis() - job1StartTime));
 		job.waitForCompletion(true);
 		
+		//Job 2: To calculate average min and max temperature and sort them based on temperature difference.
 		Long job2StartTime = System.currentTimeMillis();
 		Configuration confMinMax = new Configuration();
 		
-		//job to get min amd max temperature by month
 		Job minMaxJob = Job.getInstance(confMinMax, "MinMaxTemperature");
 		minMaxJob.setJarByClass(StableTemperature.class);
 		minMaxJob.setMapperClass(MinMaxMapper.class);
 		
 		minMaxJob.setReducerClass(MinMaxReducer.class);
-//		minMaxJob.setCombinerClass(MinMaxReducer.class);
 		minMaxJob.setInputFormatClass(KeyValueTextInputFormat.class);
 		minMaxJob.setMapOutputKeyClass(Text.class);
 		minMaxJob.setMapOutputValueClass(Text.class);
 		minMaxJob.setOutputKeyClass(Text.class);
 		minMaxJob.setOutputValueClass(MinMaxValue.class);
-//		minMaxJob.setSortComparatorClass(MinMaxComparator.class);
 		
 		
 		FileInputFormat.addInputPath(minMaxJob, new Path(outputFilePathName+stateTempOutputFile));
 		FileOutputFormat.setOutputPath(minMaxJob, new Path(outputFilePathName+minMaxTempOutputFile));
-		
-		System.out.print("Job 2 completed in :: " + (System.currentTimeMillis() - job2StartTime));
 		
 		System.exit(minMaxJob.waitForCompletion(true) ? 0 : 1);
 		
