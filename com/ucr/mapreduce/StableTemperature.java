@@ -105,13 +105,18 @@ public class StableTemperature {
 				String minMonth = "MinMonth";
 				String minTemp = "MinTemp";
 				String difference = "TempDifference";
-				String minPrec = "MinPrec";
-				String maxPrec = "MaxPrec";
+				String minPrec = "MinMonthPrec";
+				String maxPrec = "MaxMonthPrec";
 				
 				String sep = "\t";
 				return maxTemp + sep + maxMonth + sep + minTemp + sep + minMonth + sep + difference + sep + minPrec + sep + maxPrec;
 			}
-			return maxTemperature + "\t" + maxMonth + "\t" + minTemperature + "\t" + minMonth + "\t" + difference + "\t" + minMonthPrec + "\t" + maxMonthPrec;
+			
+			return format(maxTemperature) + "\t" + maxMonth + "\t" + format(minTemperature) + "\t" + minMonth + "\t" + format(difference) + "\t" + format(minMonthPrec) + "\t" + format(maxMonthPrec);
+		}
+		
+		String format(Double d) {
+			return String.format("%.2f", d);
 		}
 		
 //		public MinMaxValue() {
@@ -252,19 +257,7 @@ public class StableTemperature {
 		return months[month-1];
 	}
 	
-	public static class TemperatureReducer extends Reducer<Text, Text, Text, Text>{
-		
-		@Override
-		public void run(Reducer<Text, Text, Text, Text>.Context context) throws IOException, InterruptedException {
-			setup(context);
-			Text column = new Text("State");
-//			Text values = new Text("MaxTemp \t MaxMonth \t MinTemp \t MinMonth \t TempDiff \t MinPrecipitation \t MaxPrecipitation");
-			context.write(column, new Text("AvgTemperature \t Month \t AvgPrecipitation"));
-			while (context.nextKeyValue()) {
-		       reduce(context.getCurrentKey(), context.getValues(), context);
-		    }
-			cleanup(context);
-		}
+	public static class TemperatureCombiner extends Reducer<Text, Text, Text, Text>{
 		
 		public void reduce(Text key, Iterable<Text> values, Reducer<Text, Text, Text, Text>.Context context)
 				throws IOException, InterruptedException {
@@ -302,6 +295,29 @@ public class StableTemperature {
 			Double averagePrec = totalPrec / totalCount;
 //			System.out.println("Computing for "+key+" -> " + totalTemp + " / " + totalCount + " = " + String.valueOf(averageTempAtState));
 			context.write(new Text(state), new Text(averageTempAtState.toString()+"\t"+monthInString + "\t" + averagePrec));
+		}
+	}
+	
+	public static class TemperatureReducer extends Reducer<Text, Text, Text, Text>{
+		
+		@Override
+		public void run(Reducer<Text, Text, Text, Text>.Context context) throws IOException, InterruptedException {
+			setup(context);
+			Text column = new Text("State");
+//			Text values = new Text("MaxTemp \t MaxMonth \t MinTemp \t MinMonth \t TempDiff \t MinPrecipitation \t MaxPrecipitation");
+			context.write(column, new Text("AvgTemperature \t Month \t AvgPrecipitation"));
+			while (context.nextKeyValue()) {
+		       reduce(context.getCurrentKey(), context.getValues(), context);
+		    }
+			cleanup(context);
+		}
+		
+		public void reduce(Text key, Iterable<Text> values, Reducer<Text, Text, Text, Text>.Context context)
+				throws IOException, InterruptedException {
+			//sample input -> AK	324.0::24.0
+			for(Text t : values) {
+				context.write(key, t);
+			}
 		}
 	}
 	
@@ -345,8 +361,8 @@ public class StableTemperature {
 			String minMonth = "";
 			String maxMonth = "";
 //			Double averagePrecipitation = 0.0;
-			double minPrec = 0.0;
-			double maxPrec = 0.0;
+			double minPrec = Double.MAX_VALUE;
+			double maxPrec = Double.MIN_VALUE;
 //			Double totalTemp = 0.0;
 //			Double totalCount = 0.0;
 			for(Text t : values) {
@@ -357,6 +373,7 @@ public class StableTemperature {
 				String[] tempVsMonth = t.toString().split("\\s+");
 				try {
 					Double temp = Double.valueOf(tempVsMonth[0]);
+					Double prec = Double.valueOf(tempVsMonth[2]);
 //					totalTemp += temp;
 //					totalCount++;
 					if(temp > maxTemp) {
@@ -436,7 +453,7 @@ public class StableTemperature {
 		DistributedCache.addCacheFile(new URI(inputPathFile), job.getConfiguration());
 		
 		job.setReducerClass(TemperatureReducer.class);
-//		job.setCombinerClass(TemperatureReducer.class);
+		job.setCombinerClass(TemperatureCombiner.class);
 		
 		job.setInputFormatClass(KeyValueTextInputFormat.class);
 		
