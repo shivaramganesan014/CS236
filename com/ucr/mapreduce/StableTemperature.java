@@ -14,7 +14,9 @@ import java.util.List;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.RemoteIterator;
 import org.apache.hadoop.io.DoubleWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.io.WritableComparable;
@@ -408,7 +410,9 @@ public class StableTemperature {
 	public static void main(String[] args) throws IOException, ClassNotFoundException, InterruptedException, URISyntaxException {
 		
 		
-		String inputPathFile = "/input_dir/WeatherStationLocations.csv";
+//		String inputPathFile = "/input_dir/WeatherStationLocations.csv";
+		String inputPathFile = args[0];
+		String outputFilePathName = args[2];
 		String stateTempOutputFile = "/states_temperature";
 		String minMaxTempOutputFile = "/min_max_temparature";
 		
@@ -417,8 +421,8 @@ public class StableTemperature {
 		deleteConf.set("fs.hdfs.impl",org.apache.hadoop.hdfs.DistributedFileSystem.class.getName());
 		deleteConf.set("fs.file.impl",org.apache.hadoop.fs.LocalFileSystem.class.getName());
 	    FileSystem  hdfs = FileSystem.get(URI.create("hdfs://localhost:9820"), deleteConf);
-	    hdfs.delete(new Path(stateTempOutputFile), true);
-	    hdfs.delete(new Path(minMaxTempOutputFile), true);
+	    hdfs.delete(new Path(outputFilePathName+stateTempOutputFile), true);
+	    hdfs.delete(new Path(outputFilePathName + minMaxTempOutputFile), true);
 		
 	    //job to get average temperature for each states
 		Long job1StartTime = System.currentTimeMillis();
@@ -441,11 +445,24 @@ public class StableTemperature {
 		job.setOutputKeyClass(Text.class);
 		job.setOutputValueClass(Text.class);
 		
-		MultipleInputs.addInputPath(job, new Path("/input_dir/2007.txt"), TextInputFormat.class, TemperatureMapper.class);
-		MultipleInputs.addInputPath(job, new Path("/input_dir/2006.txt"), TextInputFormat.class, TemperatureMapper.class);
-		MultipleInputs.addInputPath(job, new Path("/input_dir/2008.txt"), TextInputFormat.class, TemperatureMapper.class);
-		MultipleInputs.addInputPath(job, new Path("/input_dir/2009.txt"), TextInputFormat.class, TemperatureMapper.class);
-		FileOutputFormat.setOutputPath(job, new Path(stateTempOutputFile));
+		String temperatureFileDir = args[1];
+		FileSystem fs = FileSystem.get(conf);
+		
+		
+
+		RemoteIterator<LocatedFileStatus> fileStatusListIterator = fs.listFiles(new Path(temperatureFileDir), true);
+		
+		 while(fileStatusListIterator.hasNext()){
+		        LocatedFileStatus fileStatus = fileStatusListIterator.next();
+		        //do stuff with the file like ...
+		        MultipleInputs.addInputPath(job, fileStatus.getPath(), TextInputFormat.class, TemperatureMapper.class);
+		    }
+		
+//		MultipleInputs.addInputPath(job, new Path("/input_dir/2007.txt"), TextInputFormat.class, TemperatureMapper.class);
+//		MultipleInputs.addInputPath(job, new Path("/input_dir/2006.txt"), TextInputFormat.class, TemperatureMapper.class);
+//		MultipleInputs.addInputPath(job, new Path("/input_dir/2008.txt"), TextInputFormat.class, TemperatureMapper.class);
+//		MultipleInputs.addInputPath(job, new Path("/input_dir/2009.txt"), TextInputFormat.class, TemperatureMapper.class);
+		FileOutputFormat.setOutputPath(job, new Path(outputFilePathName+stateTempOutputFile));
 		
 		System.out.print("Job 1 completed in :: " + (System.currentTimeMillis() - job1StartTime));
 		job.waitForCompletion(true);
@@ -468,8 +485,8 @@ public class StableTemperature {
 //		minMaxJob.setSortComparatorClass(MinMaxComparator.class);
 		
 		
-		FileInputFormat.addInputPath(minMaxJob, new Path(stateTempOutputFile));
-		FileOutputFormat.setOutputPath(minMaxJob, new Path(minMaxTempOutputFile));
+		FileInputFormat.addInputPath(minMaxJob, new Path(outputFilePathName+stateTempOutputFile));
+		FileOutputFormat.setOutputPath(minMaxJob, new Path(outputFilePathName+minMaxTempOutputFile));
 		
 		System.out.print("Job 2 completed in :: " + (System.currentTimeMillis() - job2StartTime));
 		
