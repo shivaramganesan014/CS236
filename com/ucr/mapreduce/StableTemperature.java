@@ -115,9 +115,6 @@ public class StableTemperature {
 			return format(maxTemperature) + "\t" + maxMonth + "\t" + format(minTemperature) + "\t" + minMonth + "\t" + format(difference) + "\t" + format(minMonthPrec) + "\t" + format(maxMonthPrec);
 		}
 		
-		String format(Double d) {
-			return String.format("%.2f", d);
-		}
 		
 //		public MinMaxValue() {
 //
@@ -192,6 +189,10 @@ public class StableTemperature {
 			return o.getDifference().compareTo(difference);
 		}
 		
+	}
+	
+	public static String format(Double d) {
+		return String.format("%.2f", d);
 	}
 	
 	public static class TemperatureMapper extends Mapper<Object, Text, Text, Text>{
@@ -285,8 +286,9 @@ public class StableTemperature {
 				
 				totalPrec += prec;
 				
-				totalCount += count;
-				totalTemp += tempAtState * count;
+				totalCount += 1;
+				totalTemp += tempAtState;
+//				totalTemp += tempAtState * count;
 			}
 			if(totalCount == 0) {
 				totalCount++;
@@ -294,7 +296,8 @@ public class StableTemperature {
 			Double averageTempAtState = totalTemp / totalCount;
 			Double averagePrec = totalPrec / totalCount;
 //			System.out.println("Computing for "+key+" -> " + totalTemp + " / " + totalCount + " = " + String.valueOf(averageTempAtState));
-			context.write(new Text(state), new Text(averageTempAtState.toString()+"\t"+monthInString + "\t" + averagePrec));
+//			context.write(new Text(state+"::"+month), new Text(averageTempAtState.toString()+"::"+monthInString + "::" + averagePrec));
+			context.write(new Text(state+"::"+month), new Text(averageTempAtState.toString()+"::"+totalCount+ "::" + format(averagePrec)));
 		}
 	}
 	
@@ -315,9 +318,46 @@ public class StableTemperature {
 		public void reduce(Text key, Iterable<Text> values, Reducer<Text, Text, Text, Text>.Context context)
 				throws IOException, InterruptedException {
 			//sample input -> AK	324.0::24.0
-			for(Text t : values) {
-				context.write(key, t);
+//			for(Text t : values) {
+//				context.write(key, t);
+//			}
+			//sample input -> AK	324.0::24.0
+//			System.out.println("Inside reducer :: " + key.toString());
+			double totalTemp = 0.0;
+			double totalPrec = 0.0;
+			double totalCount = 0.0;
+			String allValues = "";
+			String[] stateVsMonth = key.toString().split("::");
+			if(stateVsMonth.length < 2) {
+				System.out.println("State Vs Month - not suficient data :: " + key.toString());
+				return;
 			}
+			String state = stateVsMonth[0];
+			String month = stateVsMonth[1];
+			String monthInString = getMonthInString(Integer.parseInt(month));
+			for(Text t : values) {
+//				System.out.println("reducer value :: "+t.toString());
+				String[] tempData = t.toString().split("::");
+				if(tempData.length < 3) {//temp, count and precipitation
+					continue;
+				}
+				Double tempAtState = Double.valueOf(tempData[0]);
+				Double count = Double.valueOf(tempData[1]);
+				Double prec = Double.valueOf(tempData[2].substring(0, tempData[2].length()-1));
+				
+				totalPrec += prec;
+				
+				totalCount += 1;
+				totalTemp += tempAtState;
+//				totalTemp += tempAtState * count;
+			}
+			if(totalCount == 0) {
+				totalCount++;
+			}
+			Double averageTempAtState = totalTemp / totalCount;
+			Double averagePrec = totalPrec / totalCount;
+//			System.out.println("Computing for "+key+" -> " + totalTemp + " / " + totalCount + " = " + String.valueOf(averageTempAtState));
+			context.write(new Text(state), new Text(averageTempAtState.toString()+"\t"+monthInString + "\t" + format(averagePrec)));
 		}
 	}
 	
@@ -431,15 +471,15 @@ public class StableTemperature {
 		String inputPathFile = args[0];
 		String outputFilePathName = args[2];
 		String stateTempOutputFile = "/states_temperature";
-		String minMaxTempOutputFile = "/min_max_temparature";
+		String minMaxTempOutputFile = "/min_max_temperature";
 		
 		//delete existing output files before running
-		Configuration deleteConf = new Configuration();
-		deleteConf.set("fs.hdfs.impl",org.apache.hadoop.hdfs.DistributedFileSystem.class.getName());
-		deleteConf.set("fs.file.impl",org.apache.hadoop.fs.LocalFileSystem.class.getName());
-	    FileSystem  hdfs = FileSystem.get(URI.create("hdfs://localhost:9820"), deleteConf);
-	    hdfs.delete(new Path(outputFilePathName+stateTempOutputFile), true);
-	    hdfs.delete(new Path(outputFilePathName + minMaxTempOutputFile), true);
+//		Configuration deleteConf = new Configuration();
+//		deleteConf.set("fs.hdfs.impl",org.apache.hadoop.hdfs.DistributedFileSystem.class.getName());
+//		deleteConf.set("fs.file.impl",org.apache.hadoop.fs.LocalFileSystem.class.getName());
+//	    FileSystem  hdfs = FileSystem.get(URI.create("hdfs://localhost:9820"), deleteConf);
+//	    hdfs.delete(new Path(outputFilePathName+stateTempOutputFile), true);
+//	    hdfs.delete(new Path(outputFilePathName + minMaxTempOutputFile), true);
 		
 	    //job to get average temperature for each states
 		Long job1StartTime = System.currentTimeMillis();
@@ -455,7 +495,7 @@ public class StableTemperature {
 		job.setReducerClass(TemperatureReducer.class);
 		job.setCombinerClass(TemperatureCombiner.class);
 		
-		job.setInputFormatClass(KeyValueTextInputFormat.class);
+//		job.setInputFormatClass(KeyValueTextInputFormat.class);
 		
 		job.setMapOutputKeyClass(Text.class);
 		job.setMapOutputValueClass(Text.class);
@@ -470,10 +510,10 @@ public class StableTemperature {
 		RemoteIterator<LocatedFileStatus> fileStatusListIterator = fs.listFiles(new Path(temperatureFileDir), true);
 		
 		 while(fileStatusListIterator.hasNext()){
-		        LocatedFileStatus fileStatus = fileStatusListIterator.next();
-		        //do stuff with the file like ...
-		        MultipleInputs.addInputPath(job, fileStatus.getPath(), TextInputFormat.class, TemperatureMapper.class);
-		    }
+	        LocatedFileStatus fileStatus = fileStatusListIterator.next();
+	        //do stuff with the file like ...
+	        MultipleInputs.addInputPath(job, fileStatus.getPath(), TextInputFormat.class, TemperatureMapper.class);
+	    }
 		
 //		MultipleInputs.addInputPath(job, new Path("/input_dir/2007.txt"), TextInputFormat.class, TemperatureMapper.class);
 //		MultipleInputs.addInputPath(job, new Path("/input_dir/2006.txt"), TextInputFormat.class, TemperatureMapper.class);
